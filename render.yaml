@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: savivah-admin
+    runtime: static
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /*
+        name: X-Robots-Tag
+        value: "noindex, nofollow"
