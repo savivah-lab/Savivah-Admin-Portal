@@ -117,11 +117,13 @@ function AdminLoginForm({ onAuthed }) {
 }
 
 function AdminView({ adminAuth, setAdminAuth, adminApiFetch, notify }) {
-  const [tab, setTab] = useState("orders"); // orders | sellers | payouts
+  const [tab, setTab] = useState("orders"); // orders | sellers | payouts | sellerApplications
   const [orders, setOrders] = useState([]);
   const [sellers, setSellers] = useState([]);
   const [payouts, setPayouts] = useState([]);
   const [stats, setStats] = useState(null);
+  const [sellerApplications, setSellerApplications] = useState([]);
+  const [applicationsStatus, setApplicationsStatus] = useState("pending_review");
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
@@ -135,7 +137,23 @@ function AdminView({ adminAuth, setAdminAuth, adminApiFetch, notify }) {
     } catch (e) { notify(e.message); } finally { setLoading(false); }
   }, [adminApiFetch, notify]);
 
+  const loadApplications = useCallback(async (status = applicationsStatus) => {
+    try {
+      const qs = status ? `?status=${encodeURIComponent(status)}` : "";
+      setSellerApplications(await adminApiFetch(`/admin/seller-applications${qs}`));
+    } catch (e) { notify(e.message); }
+  }, [adminApiFetch, notify, applicationsStatus]);
+
+  const decideApplication = async (id, action) => {
+    try {
+      await adminApiFetch(`/admin/seller-applications/${id}/${action}`, { method: "POST", body: JSON.stringify({}) });
+      notify(action === "approve" ? "Application approved" : "Application rejected");
+      loadApplications();
+    } catch (e) { notify(e.message); }
+  };
+
   useEffect(() => { if (adminAuth) load(); }, [adminAuth, load]);
+  useEffect(() => { if (adminAuth && tab === "sellerApplications") loadApplications(); }, [adminAuth, tab, loadApplications]);
 
   const dispatchPayout = async (payoutId) => {
     try {
@@ -153,6 +171,7 @@ function AdminView({ adminAuth, setAdminAuth, adminApiFetch, notify }) {
     { key: "orders", label: "Orders" },
     { key: "sellers", label: "Sellers" },
     { key: "payouts", label: "Payouts" },
+    { key: "sellerApplications", label: "Seller applications" },
   ];
 
   return (
@@ -180,7 +199,7 @@ function AdminView({ adminAuth, setAdminAuth, adminApiFetch, notify }) {
             <StatCard label="Total orders" value={stats?.total_orders ?? 0} sub="All time" icon={Package} />
           </div>
 
-          <div style={{ display: "flex", gap: 4, background: "#F4F1E8", borderRadius: 10, padding: 4, marginBottom: 16, width: "fit-content" }}>
+          <div style={{ display: "flex", gap: 4, background: "#F4F1E8", borderRadius: 10, padding: 4, marginBottom: 16, width: "fit-content", flexWrap: "wrap" }}>
             {tabs.map((t) => (
               <button key={t.key} onClick={() => setTab(t.key)} style={{
                 padding: "7px 16px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600,
@@ -242,6 +261,54 @@ function AdminView({ adminAuth, setAdminAuth, adminApiFetch, notify }) {
                   </div>
                 ))}
                 {payouts.length === 0 && <div style={{ fontSize: 13, color: "#9a9484" }}>No payouts yet — these appear once an order is delivered.</div>}
+              </div>
+            </div>
+          )}
+
+          {tab === "sellerApplications" && (
+            <div style={{ background: "#fff", border: "1px solid #ECE8DD", borderRadius: 12, padding: 18 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+                <div style={{ fontWeight: 700, fontSize: 15 }}>Seller applications</div>
+                <select value={applicationsStatus} onChange={(e) => { setApplicationsStatus(e.target.value); loadApplications(e.target.value); }}
+                  style={{ padding: "7px 10px", borderRadius: 7, border: "1px solid #E4DFD0", fontSize: 12.5 }}>
+                  <option value="pending_review">Pending review</option>
+                  <option value="pending_payment">Pending payment</option>
+                  <option value="approved">Approved</option>
+                  <option value="rejected">Rejected</option>
+                  <option value="">All</option>
+                </select>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {sellerApplications.map((a) => (
+                  <div key={a.id} style={{ border: "1px solid #EFEBDF", borderRadius: 10, padding: 12 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 8 }}>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: 13.5 }}>{a.businessName}</div>
+                        <div style={{ fontSize: 12, color: "#8a8471" }}>{a.fullName} · {a.email} · {a.phoneNumber}</div>
+                      </div>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: GOLD_DARK, background: "#FBF1DA", padding: "3px 9px", borderRadius: 20 }}>
+                        {a.status.replaceAll("_", " ")}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 12, color: "#5B564A", marginTop: 8 }}>
+                      {a.identificationType.replace("_", " ")}: {a.identificationNumber} · Reg. no: {a.businessRegistrationNumber || "—"} · Permit: {a.productPermit}
+                    </div>
+                    <div style={{ fontSize: 12, color: "#8a8471", marginTop: 4 }}>
+                      Fee: {money(a.feeAmount)} · Submitted: {new Date(a.createdAt).toLocaleString()}
+                    </div>
+                    {a.status === "pending_review" && (
+                      <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                        <button onClick={() => decideApplication(a.id, "approve")} style={{ padding: "7px 14px", borderRadius: 7, border: "none", background: GOLD, color: "#fff", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>
+                          Approve
+                        </button>
+                        <button onClick={() => decideApplication(a.id, "reject")} style={{ padding: "7px 14px", borderRadius: 7, border: "1px solid #B3261E", background: "#fff", color: "#B3261E", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>
+                          Reject
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {sellerApplications.length === 0 && <div style={{ fontSize: 13, color: "#9a9484" }}>No applications with this status.</div>}
               </div>
             </div>
           )}
